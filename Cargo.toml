@@ -4,4 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-burn = { version = "0.19.0", features = [ "ndarray", "std"] }
+burn = { version = "0.19.0", no-default-featurs = false }
+
+[dev-dependencies]
+burn = { version = "0.19.0", no-default-featurs = false, features = ["ndarray", "default"] }
+
+[features]
+default = ["burn/default", "std"]
+std = ["burn/std"]
+accelerate = ["burn/accelerate"]
+autodiff = ["burn/autodiff"]
+cpu = ["burn/cpu"]
