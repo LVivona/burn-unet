@@ -64,11 +64,7 @@ impl Conv2dBlockConfig {
             out_channels
         };
 
-        let dropout = if let Some(drop) = dropout {
-            Some(DropoutConfig::new(drop).init())
-        } else {
-            None
-        };
+        let dropout = dropout.map(|d| DropoutConfig::new(d).init());
 
         Conv2dBlock {
             conv_1: Conv2dConfig::new([in_channels, mid_channels], CONV2_KERNEL_SIZE)
@@ -155,18 +151,9 @@ impl EncoderBlockConfig {
 
 impl<B: Backend> EncoderBlock<B> {
     /// Applies the forward pass through the encoder.
-    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+    pub fn forward(&self, input: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>) {
         let x = self.core.forward(input);
-        self.pool.forward(x)
-    }
-
-    /// Applies the forward pass through the encoder, and clones input.
-    ///
-    /// Since we require input of the encoder for later we need to take clone
-    /// of the tensors rather then full ownership.
-    pub fn forward_ref(&self, input: &Tensor<B, 4>) -> Tensor<B, 4> {
-        let x = self.core.forward(input.clone());
-        self.pool.forward(x)
+        (self.pool.forward(x.clone()), x)
     }
 }
 
@@ -239,14 +226,13 @@ mod block_test {
     #[test]
     fn test_ndarray_backend() {
         let device = NdArrayDevice::Cpu;
-        let model: EncoderBlock<NdArray> = EncoderBlockConfig::from((3, 5)).init(&device);
+        let model: Conv2dBlock<NdArray> = Conv2dBlockConfig::new(1, 64).init(&device);
 
-        let input: Tensor<NdArray, 4> = Tensor::ones(Shape::from([1, 3, 5, 5]), &device);
+        let input: Tensor<NdArray, 4> = Tensor::ones(Shape::from([1, 1, 224, 224]), &device);
 
         let logits = model.forward(input);
         let shape = logits.shape();
         let expected_shape = Shape::from([1, 5, 2, 2]);
-
         assert_eq!(shape, expected_shape);
     }
 }

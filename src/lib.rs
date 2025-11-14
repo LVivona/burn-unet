@@ -37,7 +37,7 @@ impl UnetConfig {
         } = self;
 
         Unet {
-            inc: Conv2dBlockConfig::new(num_channels, 64).init(device),
+            inc: Conv2dBlockConfig::new(num_channels, DEFAULT_BLOCK_1_FEATRUES).init(device),
             encoder_block_1: EncoderBlockConfig::from((
                 DEFAULT_BLOCK_1_FEATRUES,
                 DEFAULT_BLOCK_2_FEATRUES,
@@ -63,7 +63,11 @@ impl UnetConfig {
                 DEFAULT_BLOCK_4_FEATRUES,
             ))
             .init(device),
-            decoder_block_2: DecoderBlockConfig::from((512, DEFAULT_BLOCK_3_FEATRUES)).init(device),
+            decoder_block_2: DecoderBlockConfig::from((
+                DEFAULT_BLOCK_4_FEATRUES,
+                DEFAULT_BLOCK_3_FEATRUES,
+            ))
+            .init(device),
             decoder_block_3: DecoderBlockConfig::from((
                 DEFAULT_BLOCK_3_FEATRUES,
                 DEFAULT_BLOCK_2_FEATRUES,
@@ -107,19 +111,44 @@ pub struct Unet<B: Backend> {
 }
 
 impl<B: Backend> Unet<B> {
-    /// Applies the foward pass through the U-net.
-    pub fn foward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+    /// Applies the forward pass through the U-net.
+    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        // NOTE: Since we need the enocder block output during the decoding
+        // we have to preform the clone through ref, if done right in the backend
+        // our memory shouldn't increase too much as we would be only gettiing
+        // a unmutable reference to the address the tensor is pointing to
+        // but it not this doubles our memeory until we can drop the tensors
+        // within the skip connection.
         let x1 = self.inc.forward(input);
-        let x2 = self.encoder_block_1.forward_ref(&x1);
-        let x3 = self.encoder_block_2.forward_ref(&x2);
-        let x4 = self.encoder_block_3.forward_ref(&x3);
-        let x5 = self.encoder_block_4.forward_ref(&x4);
+        let (x, x2) = self.encoder_block_1.forward(x1.clone());
+        let (x, x3) = self.encoder_block_2.forward(x);
+        let (x, x4) = self.encoder_block_3.forward(x);
+        let (x, x5) = self.encoder_block_4.forward(x);
 
-        let mut x = self.decoder_block_1.forward(x5, x4);
-        x = self.decoder_block_2.forward(x, x3);
-        x = self.decoder_block_3.forward(x, x2);
-        x = self.decoder_block_4.forward(x, x1);
-        let logits = self.output.forward(x);
-        logits
+        let mut x = self.decoder_block_1.forward(x, x5);
+        x = self.decoder_block_2.forward(x, x4);
+        x = self.decoder_block_3.forward(x, x3);
+        x = self.decoder_block_4.forward(x, x2);
+        self.output.forward(x)
+    }
+}
+
+#[cfg(test)]
+mod unet_test {
+
+    use burn::backend::ndarray::{NdArray, NdArrayDevice};
+    use burn::tensor::{Shape, Tensor};
+
+    use crate::{Unet, UnetConfig};
+
+    #[test]
+    fn test_unet_single_batch() {
+        let device = NdArrayDevice::Cpu;
+        let model: Unet<NdArray> = UnetConfig::new(1, 1).init(&device);
+
+        let input = Tensor::ones(Shape::from([1, 1, 221, 222]), &device);
+
+        let output = model.forward(input);
+        println!("{:?}", output.shape())
     }
 }
